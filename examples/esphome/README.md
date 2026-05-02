@@ -9,140 +9,134 @@ save it to wind_station_id / rain_station_id.
 
 ```yaml
 substitutions:
-  patform: "esp32"
-  board: "nodemcu-32s" 
   device_name: weatherstation
   comment: "Meteostation"
-  ip: "192.168.1.21"
-  station_pin: "27"   # GPIO
-  wind_station_id: "0"  # 0 = scan all available sensors (we can check it in logs). When we find our wind sensor, set its ID instead "0" 
-  rain_station_id: "0"  # 0 = scan all available sensors (we can check it in logs). When we find our rain sensor, set its ID instead "0" 
+  ip: "192.168.178.x"
+  station_pin: "14"   
+  wind_station_id: "0"
+  rain_station_id: "0"
 
+
+api:
+  encryption:
+    key: "KEY_ESPHOME_INTEGRATION"
+
+web_server:
+  port: 80
+  auth:
+    username: your_user
+    password: "your_password"
+
+ota:
+  - platform: esphome
+    password: "your_password"
+
+esp8266:
+  board: esp12e
 
 esphome:
   name: '${device_name}'
   comment: '${comment}'
-  platform: '${patform}'
-  board: "${board}"
   libraries:
-    - https://github.com/Zwer2k/WeatherStationDataRx.git@0.5.0
+    - "WeatherStationDataRx=https://github.com/Zwer2k/WeatherStationDataRx.git"
   includes:
     - WeatherStationSensor.h
-
-# Enable logging
-logger:
-#  level: DEBUG #VERY_VERBOSE
-
-ota:
-  password: "123456789123456789"
+  
+  on_boot:
+    priority: -10
+    then:
+      - lambda: |-
+          auto ws = new WeatherSensor(${station_pin}, ${wind_station_id}, ${rain_station_id});
+          App.register_component(ws);
+          id(global_ws) = (void*)ws;
 
 wifi:
-  use_address: "${ip}"
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ssid: "your_ap_ssid"
+  password: "your_AP_password"
+  manual_ip:
+    static_ip: "${ip}"
+    gateway: 192.168.178.1
+    subnet: 255.255.255.0
 
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
-  ap:
-    ssid: "Weather-Station Fallback Hotspot"
-    password: "ZFPdpx2JP4O8"
 
-mqtt:
-  broker: 192.168.1.1
-  username: mqtt_user
-  password: !secret mqtt_password  
 
+globals:
+  - id: global_ws
+    type: 'void*'
+    restore_value: no
+    initial_value: 'nullptr'
 
 sensor:
-  - platform: custom
+  - platform: template
+    name: "${device_name} Temperature"
+    unit_of_measurement: "°C"
+    device_class: TEMPERATURE
+    state_class: measurement
     lambda: |-
-      WeatherSensor *ws = new WeatherSensor(${station_pin}, ${wind_station_id}, ${rain_station_id});
-      App.register_component(ws);
-      return {
-        ws->temperature,
-        ws->humidity,
-        ws->wind_speed,
-        ws->wind_direction,
-        ws->wind_gust,
-        ws->rain_volume,
-        ws->battery_wind_station,
-        ws->battery_rain_station
-      };      
-    sensors:
-      - name: "${device_name} Temperature"
-        id: "${device_name}_temperature"
-        device_class: TEMPERATURE
-        state_class: measurement
-        unit_of_measurement: "°C"
-        accuracy_decimals: 2
-        force_update: true
-        filters:
-          - quantile:
-              quantile: .25
+      if (id(global_ws) == nullptr) return {};
+      auto ws = (WeatherSensor*)id(global_ws);
+      return ws->temperature->state;
 
-      - name: "${device_name} Humidity"
-        id: "${device_name}_humidity"
-        device_class: HUMIDITY
-        state_class: measurement
-        unit_of_measurement: "%"
-        accuracy_decimals: 2
-        force_update: true
-        filters:
-          - quantile:
-              quantile: .25
+  - platform: template
+    name: "${device_name} Humidity"
+    unit_of_measurement: "%"
+    device_class: HUMIDITY
+    state_class: measurement
+    lambda: |-
+      if (id(global_ws) == nullptr) return {};
+      auto ws = (WeatherSensor*)id(global_ws);
+      return ws->humidity->state;
 
-      - name: "${device_name} Wind Speed"
-        id: "${device_name}_wind_speed"
-        device_class: WIND_SPEED
-        state_class: measurement
-        unit_of_measurement: m/s
-        accuracy_decimals: 2
-        force_update: true
+  - platform: template
+    name: "${device_name} Wind Speed"
+    unit_of_measurement: "m/s"
+    device_class: WIND_SPEED
+    state_class: measurement
+    lambda: |-
+      if (id(global_ws) == nullptr) return {};
+      auto ws = (WeatherSensor*)id(global_ws);
+      return ws->wind_speed->state;
 
+  - platform: template
+    name: "${device_name} Rain Volume"
+    unit_of_measurement: "mm"
+    device_class: PRECIPITATION
+    state_class: total_increasing
+    lambda: |-
+      if (id(global_ws) == nullptr) return {};
+      auto ws = (WeatherSensor*)id(global_ws);
+      return ws->rain_volume->state;
 
-      - name: "${device_name} Wind Direction"
-        id: "${device_name}_wind_direction"
-        state_class: measurement
-        unit_of_measurement: °
-        accuracy_decimals: 0
-        force_update: true
+  - platform: template
+    name: "Direzione Vento"
+    unit_of_measurement: "°"
+    icon: "mdi:compass"
+    lambda: |-
+        if (id(global_ws) == nullptr) return {};
+        return ((WeatherSensor*)id(global_ws))->wind_direction->state;
 
+  - platform: template
+    name: "Batteria Sensore Esterno"
+    unit_of_measurement: "%"
+    device_class: BATTERY
+    entity_category: diagnostic
+    lambda: |-
+        if (id(global_ws) == nullptr) return {};
+        return ((WeatherSensor*)id(global_ws))->battery_wind_station->state;
 
-      - name: "${device_name} Wind Gust"
-        id: "${device_name}_wind_gust"
-        device_class: WIND_SPEED
-        state_class: measurement
-        unit_of_measurement: m/s
-        accuracy_decimals: 2
-        force_update: true
+  - platform: template
+    name: "Raffica di Vento"
+    id: wind_gust_sensor
+    unit_of_measurement: "m/s"
+    device_class: WIND_SPEED
+    state_class: measurement
+    icon: "mdi:weather-windy-variant"
+    lambda: |-
+        if (id(global_ws) == nullptr) return {};
+        return ((WeatherSensor*)id(global_ws))->wind_gust->state;
+      
 
-
-      - name: "${device_name} Rain volume"
-        id: "${device_name}_rain_volume"
-        device_class: WATER
-        state_class: total_increasing
-        unit_of_measurement: L
-        accuracy_decimals: 2
-        force_update: true
-        filters:
-          - quantile:
-              send_first_at: 3
-              quantile: .0025
-
-
-      - name: "${device_name} Battery wind station"
-        id: "${device_name}_battery_wind_station"
-        device_class: BATTERY
-        state_class: measurement
-        unit_of_measurement: "%"
-        accuracy_decimals: 0
-        force_update: false
-
-      - name: "${device_name} Battery rain station"
-        id: "${device_name}_battery_rain_station"
-        device_class: BATTERY
-        state_class: measurement
-        unit_of_measurement: "%"
-        accuracy_decimals: 0
-        force_update: false
+logger:
+  level: DEBUG
 
 ```
