@@ -1,4 +1,4 @@
-# WeatherStationDataRx
+# WeatherStation update with Homeassistant intergation in esphome configuration
 Arduino library for read weather data from Ventus W174/W132 (tested), Auriol H13726, Hama EWS 1500, Meteoscan W155/W160
 
 The transmission protocol of the weather station is described here: 
